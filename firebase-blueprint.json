@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "FamilySpace": {
+      "title": "FamilySpace",
+      "description": "Representing a shared family workspace that syncs across multiple devices",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique family space ID matching the sync code"
+        },
+        "name": {
+          "type": "string",
+          "description": "Custom name of the family"
+        },
+        "children": {
+          "type": "array",
+          "description": "List of children profile data"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "List of chores or custom tasks configured"
+        },
+        "rewards": {
+          "type": "array",
+          "description": "List of rewards listed in the shop"
+        },
+        "transactions": {
+          "type": "array",
+          "description": "Recent transactional ledger lines for the workspace"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "System-provided modification timestamp"
+        }
+      },
+      "required": ["id", "children", "tasks", "rewards", "transactions"]
+    }
+  },
+  "firestore": {
+    "/spaces/{spaceId}": {
+      "schema": "FamilySpace",
+      "description": "Main document containing shared kids coins data for a given sync code"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Kids Points and Rewards System",
+  "description": "An interactive gold coin reward system for children with interactive sound effects, gold splash animations, a siblings leaderboard, a rewards shop, and a full admin customizer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
