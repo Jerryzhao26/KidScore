@@ -47,8 +47,6 @@ export interface Transaction {
   amount: number;
   description: string;
   timestamp: string; // ISO format
-  isRevoked?: boolean;
-  revokedAt?: string;
 }
 
 export interface AppState {

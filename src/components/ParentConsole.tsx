@@ -40,8 +40,6 @@ interface ParentConsoleProps {
   penalties: Penalty[];
   rewards: Reward[];
   transactions: Transaction[];
-  authCode: string;
-  onUpdateAuthCode: (newCode: string) => void;
   onAddChild: (name: string, avatar: string) => void;
   onDeleteChild: (id: string) => void;
   onUpdateChildCoins: (id: string, amount: number, memo: string) => void;
@@ -58,7 +56,6 @@ interface ParentConsoleProps {
   onMoveReward: (id: string, direction: 'up' | 'down') => void;
   
   onClearTransactions: () => void;
-  onRequestUndoTransaction?: (transactionId: string) => void;
 }
 
 export default function ParentConsole({
@@ -67,8 +64,6 @@ export default function ParentConsole({
   penalties,
   rewards,
   transactions,
-  authCode,
-  onUpdateAuthCode,
   onAddChild,
   onDeleteChild,
   onUpdateChildCoins,
@@ -81,7 +76,6 @@ export default function ParentConsole({
   onDeleteReward,
   onMoveReward,
   onClearTransactions,
-  onRequestUndoTransaction,
 }: ParentConsoleProps) {
   // Parent Verification Gate
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -94,11 +88,6 @@ export default function ParentConsole({
 
   // Active sub-section
   const [activeSubTab, setActiveSubTab] = useState<'kids' | 'tasks' | 'penalties' | 'rewards' | 'transactions'>('kids');
-
-  // Authorization Code Settings States
-  const [showAuthCode, setShowAuthCode] = useState<boolean>(false);
-  const [newAuthCodeInput, setNewAuthCodeInput] = useState<string>('');
-  const [authCodeSuccess, setAuthCodeSuccess] = useState<string | null>(null);
 
   // New Child Form States
   const [newChildName, setNewChildName] = useState<string>('');
@@ -692,70 +681,6 @@ export default function ParentConsole({
                 </form>
               </div>
 
-              {/* Box C: Score Authorization Code Settings */}
-              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
-                <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5 border-b border-slate-100 pb-3">
-                  <Lock className="w-4 h-4 text-amber-500" />
-                  🔐 加减分授权码设置 (保护得分安全性)
-                </h3>
-                <div className="space-y-3 text-xs font-semibold">
-                  <p className="text-slate-500 leading-relaxed text-[11px]">
-                    点击顶部【锁按钮】或在锁定状态下操作加减分时，输入授权码即可解锁。解锁后可连续快速操作加减分，完成后再次点击锁按钮即可重新锁定，防止小朋友随意修改分数。
-                  </p>
-
-                  <div className="flex items-center justify-between bg-amber-50/70 border border-amber-200/60 p-3 rounded-xl">
-                    <span className="text-amber-900 font-bold">当前生效授权码：</span>
-                    <div className="flex items-center gap-2 font-mono font-black text-sm">
-                      <span>{showAuthCode ? authCode : '••••••'}</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAuthCode(!showAuthCode)}
-                        className="text-[10px] text-amber-700 hover:underline px-2 py-0.5 bg-amber-100/80 rounded-md cursor-pointer"
-                      >
-                        {showAuthCode ? '隐藏' : '显示'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <form onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!newAuthCodeInput.trim()) return;
-                    onUpdateAuthCode(newAuthCodeInput.trim());
-                    setAuthCodeSuccess('加减分授权码已成功修改！');
-                    setNewAuthCodeInput('');
-                    setTimeout(() => setAuthCodeSuccess(null), 3000);
-                    audio.playUnlock();
-                  }} className="space-y-3">
-                    <div>
-                      <label className="text-slate-500 mb-1 block">修改设置新授权码：</label>
-                      <input
-                        type="text"
-                        placeholder="请输入新的授权码 (默认: 8888)"
-                        value={newAuthCodeInput}
-                        onChange={(e) => setNewAuthCodeInput(e.target.value)}
-                        required
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-bold text-slate-800 outline-none focus:border-amber-400"
-                      />
-                    </div>
-
-                    {authCodeSuccess && (
-                      <p className="text-emerald-600 text-[11px] font-bold flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5" />
-                        {authCodeSuccess}
-                      </p>
-                    )}
-
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 rounded-xl font-black text-center text-xs shadow-sm cursor-pointer border transition-all flex items-center justify-center gap-1.5 text-slate-900 bg-amber-400 hover:bg-amber-500 border-amber-400"
-                    >
-                      <Check className="w-4 h-4 text-slate-900" />
-                      更新加减分授权码
-                    </button>
-                  </form>
-                </div>
-              </div>
-
             </div>
           </motion.div>
         )}
@@ -1290,26 +1215,45 @@ export default function ParentConsole({
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => {
-                            setConfirmModal({
-                              isOpen: true,
-                              title: `确认删除扣分规则 [${penalty.title}] 吗？`,
-                              message: '删除此扣分规则后，历史账单不受影响，但快捷扣分菜单中将不再出现此项目。',
-                              confirmText: '确认删除',
-                              cancelText: '取消',
-                              type: 'danger',
-                              onConfirm: () => {
-                                onDeletePenalty(penalty.id);
-                                audio.playError();
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExecPenaltyId(penalty.id);
+                              if (!execChildId && children.length > 0) {
+                                setExecChildId(children[0].id);
                               }
-                            });
-                          }}
-                          className="text-rose-500 hover:text-rose-700 hover:bg-rose-100 p-2 rounded-xl transition-all shrink-0 cursor-pointer"
-                          title="删除扣分项"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                              audio.playUnlock();
+                            }}
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                            title="选择此项并跳转执行扣分"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            执行扣分
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setConfirmModal({
+                                isOpen: true,
+                                title: `确认删除扣分规则 [${penalty.title}] 吗？`,
+                                message: '删除此扣分规则后，历史账单不受影响，但快捷扣分菜单中将不再出现此项目。',
+                                confirmText: '确认删除',
+                                cancelText: '取消',
+                                type: 'danger',
+                                onConfirm: () => {
+                                  onDeletePenalty(penalty.id);
+                                  audio.playError();
+                                }
+                              });
+                            }}
+                            className="text-rose-500 hover:text-rose-700 hover:bg-rose-100 p-2 rounded-xl transition-all shrink-0 cursor-pointer"
+                            title="删除扣分项"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1452,13 +1396,12 @@ export default function ParentConsole({
                     <th className="py-3 px-4">变更金币点数</th>
                     <th className="py-3 px-4">详细事项说明</th>
                     <th className="py-3 px-4">精确记录戳时间</th>
-                    <th className="py-3 px-4 text-center">账单撤销 / 状态</th>
                   </tr>
                 </thead>
                 <tbody className="font-semibold text-slate-700">
                   {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-10 text-slate-400 font-medium">
+                      <td colSpan={5} className="text-center py-10 text-slate-400 font-medium">
                         当前还没有产生任何金币交易历史
                       </td>
                     </tr>
@@ -1474,12 +1417,7 @@ export default function ParentConsole({
                       let amtStyle = 'text-indigo-600';
                       let prefix = '';
 
-                      if (tx.isRevoked) {
-                        badgeText = '已撤销记录';
-                        badgeStyle = 'bg-slate-100 border-slate-200 text-slate-400 line-through';
-                        amtStyle = 'text-slate-400 line-through';
-                        prefix = tx.amount >= 0 ? '+' : '';
-                      } else if (isEarn) {
+                      if (isEarn) {
                         badgeText = '完成任务';
                         badgeStyle = 'bg-emerald-50 border-emerald-200 text-emerald-700';
                         amtStyle = 'text-emerald-700';
@@ -1509,29 +1447,11 @@ export default function ParentConsole({
                           <td className={`py-3.5 px-4 font-black text-sm ${amtStyle}`}>
                             {prefix}{tx.amount}
                           </td>
-                          <td className={`py-3.5 px-4 font-sans max-w-sm text-slate-600 font-medium ${tx.isRevoked ? 'line-through text-slate-400' : ''}`}>
+                          <td className="py-3.5 px-4 font-sans max-w-sm text-slate-600 font-medium">
                             {tx.description}
                           </td>
                           <td className="py-3.5 px-4 text-[10px] text-slate-400 font-medium">
                             {new Date(tx.timestamp).toLocaleString('zh-CN')}
-                          </td>
-                          <td className="py-3.5 px-4 text-center">
-                            {tx.isRevoked ? (
-                              <span className="text-[10px] bg-slate-100 text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full font-bold">
-                                已撤销
-                              </span>
-                            ) : (
-                              onRequestUndoTransaction && (
-                                <button
-                                  onClick={() => onRequestUndoTransaction(tx.id)}
-                                  className="text-[11px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
-                                  title="撤销此笔金币变动"
-                                >
-                                  <RotateCcw className="w-3 h-3" />
-                                  撤销变动
-                                </button>
-                              )
-                            )}
                           </td>
                         </tr>
                       );

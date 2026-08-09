@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Coins, 
@@ -22,7 +22,6 @@ import {
   Database, 
   HelpCircle, 
   Lock, 
-  Unlock,
   ArrowRight,
   Wifi,
   ExternalLink,
@@ -120,23 +119,6 @@ export default function App() {
 
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
 
-  const [isScoreLocked, setIsScoreLocked] = useState<boolean>(true);
-
-  const [authCode, setAuthCode] = useState<string>(() => {
-    return localStorage.getItem('kids-coins-authcode') || '8888';
-  });
-
-  const [pendingScoreAction, setPendingScoreAction] = useState<{
-    type: 'completeTask' | 'redeemReward' | 'manualAdjust' | 'applyPenalty' | 'undoTransaction' | 'unlockOnly';
-    payload: any;
-    title: string;
-    description: string;
-    coinsChangeText: string;
-  } | null>(null);
-
-  const [authInput, setAuthInput] = useState<string>('');
-  const [authError, setAuthError] = useState<string>('');
-
   const [currentUser, setCurrentUser] = useState<string>(() => {
     return localStorage.getItem('kids-coins-user') || '';
   });
@@ -208,10 +190,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('kids-coins-transactions', JSON.stringify(transactions));
   }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem('kids-coins-authcode', authCode);
-  }, [authCode]);
 
   useEffect(() => {
     if (activeChildId) {
@@ -800,232 +778,6 @@ export default function App() {
     setTransactions([]);
   };
 
-  // Undo / Revoke Transaction
-  const handleUndoTransaction = (transactionId: string) => {
-    const txIndex = transactions.findIndex(t => t.id === transactionId);
-    if (txIndex === -1) return;
-    const tx = transactions[txIndex];
-    if (tx.isRevoked) return;
-
-    isDirtyRef.current = true;
-
-    setChildren(prev => {
-      const childIdx = prev.findIndex(c => c.id === tx.childId);
-      if (childIdx === -1) return prev;
-
-      const copy = [...prev];
-      const child = { ...copy[childIdx] };
-
-      if (tx.type === 'earn') {
-        child.coins = Math.max(0, child.coins - tx.amount);
-        child.totalEarned = Math.max(0, child.totalEarned - tx.amount);
-      } else if (tx.type === 'spend') {
-        child.coins = child.coins + tx.amount;
-        child.totalSpent = Math.max(0, child.totalSpent - tx.amount);
-      } else if (tx.type === 'deduct') {
-        child.coins = child.coins + tx.amount;
-      } else if (tx.type === 'parent_adjust') {
-        if (tx.amount > 0) {
-          child.coins = Math.max(0, child.coins - tx.amount);
-          child.totalEarned = Math.max(0, child.totalEarned - tx.amount);
-        } else {
-          child.coins = child.coins + Math.abs(tx.amount);
-        }
-      }
-
-      copy[childIdx] = child;
-      return copy;
-    });
-
-    setTransactions(prev => {
-      const copy = [...prev];
-      copy[txIndex] = {
-        ...copy[txIndex],
-        isRevoked: true,
-        revokedAt: new Date().toISOString()
-      };
-      return copy;
-    });
-
-    audio.playTriumph();
-    showToast('🎉 已成功撤销该笔加减分记录，对应金币点数已复原！', 'success');
-  };
-
-  // Score Action Requests (Direct execution when unlocked, or prompt code when locked)
-  const onRequestCompleteTask = (childId: string, taskId: string, e?: React.MouseEvent) => {
-    const task = tasks.find(t => t.id === taskId);
-    const child = children.find(c => c.id === childId);
-    if (!task || !child) return;
-
-    if (!isScoreLocked) {
-      handleCompleteTask(childId, taskId);
-      audio.playCoinCascade();
-      if (e) {
-        triggerCoinShower(10, e.clientX, e.clientY);
-      } else {
-        triggerCoinShower(10);
-      }
-      showToast(`🎉 +${task.coins} 金币！【${child.name}】完成了“${task.title}”`, 'success');
-      return;
-    }
-
-    setPendingScoreAction({
-      type: 'completeTask',
-      payload: { childId, taskId, event: e ? { clientX: e.clientX, clientY: e.clientY } : null },
-      title: '日常任务金币结算',
-      description: `正在为【${child.name}】结算完成任务：“${task.title}”`,
-      coinsChangeText: `+${task.coins} 金币`
-    });
-    setAuthInput('');
-    setAuthError('');
-  };
-
-  const onRequestRedeemReward = (childId: string, rewardId: string): boolean => {
-    const reward = rewards.find(r => r.id === rewardId);
-    const child = children.find(c => c.id === childId);
-    if (!reward || !child) return false;
-
-    if (child.coins < reward.coins) {
-      audio.playError();
-      showToast(`金币不足！需要 ${reward.coins} 金币，【${child.name}】当前只有 ${child.coins} 金币。`, 'error');
-      return false;
-    }
-
-    if (!isScoreLocked) {
-      const success = handleRedeemReward(childId, rewardId);
-      if (success) {
-        audio.playSpend();
-        triggerCoinShower(5);
-        showToast(`🎁 -${reward.coins} 金币！【${child.name}】成功兑换了“${reward.title}”`, 'success');
-      }
-      return success;
-    }
-
-    setPendingScoreAction({
-      type: 'redeemReward',
-      payload: { childId, rewardId },
-      title: '商店奖品积分兑换',
-      description: `正在为【${child.name}】兑换奖品：“${reward.title}”`,
-      coinsChangeText: `-${reward.coins} 金币`
-    });
-    setAuthInput('');
-    setAuthError('');
-    return true;
-  };
-
-  const onRequestManualAdjust = (childId: string, amount: number, memo: string) => {
-    const child = children.find(c => c.id === childId);
-    if (!child) return;
-
-    if (!isScoreLocked) {
-      handleUpdateChildCoins(childId, amount, memo);
-      triggerCoinShower(8);
-      showToast(`⚡ 【${child.name}】金币变动 ${amount >= 0 ? '+' : ''}${amount} (${memo || '自定义微调'})`, 'success');
-      return;
-    }
-
-    setPendingScoreAction({
-      type: 'manualAdjust',
-      payload: { childId, amount, memo },
-      title: '微调金币点数',
-      description: `正在为【${child.name}】手动调整金币 (${memo || '管理员设置'})`,
-      coinsChangeText: `${amount >= 0 ? '+' : ''}${amount} 金币`
-    });
-    setAuthInput('');
-    setAuthError('');
-  };
-
-  const onRequestApplyPenalty = (childId: string, penaltyId: string, customMemo?: string) => {
-    const penalty = penalties.find(p => p.id === penaltyId);
-    const child = children.find(c => c.id === childId);
-    if (!penalty || !child) return;
-
-    if (!isScoreLocked) {
-      handleApplyPenalty(childId, penaltyId, customMemo);
-      return;
-    }
-
-    setPendingScoreAction({
-      type: 'applyPenalty',
-      payload: { childId, penaltyId, memo: customMemo },
-      title: '登记违规扣分',
-      description: `正在为【${child.name}】登记违规扣分：“${penalty.title}”`,
-      coinsChangeText: `-${penalty.coins} 金币`
-    });
-    setAuthInput('');
-    setAuthError('');
-  };
-
-  const onRequestUndoTransaction = (transactionId: string) => {
-    const tx = transactions.find(t => t.id === transactionId);
-    if (!tx || tx.isRevoked) return;
-
-    if (!isScoreLocked) {
-      handleUndoTransaction(transactionId);
-      return;
-    }
-
-    setPendingScoreAction({
-      type: 'undoTransaction',
-      payload: { transactionId },
-      title: '撤销历史金币变动记录',
-      description: `正在撤销变动事项：“${tx.description}”`,
-      coinsChangeText: `撤销复原 ${tx.amount} 金币`
-    });
-    setAuthInput('');
-    setAuthError('');
-  };
-
-  const handleConfirmScoreAction = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pendingScoreAction) return;
-
-    const inputCode = authInput.trim();
-    if (inputCode === authCode || inputCode === '8888') {
-      const action = pendingScoreAction;
-      setPendingScoreAction(null);
-      setAuthInput('');
-      setAuthError('');
-
-      // Unlock score modification mode!
-      setIsScoreLocked(false);
-      audio.playUnlock();
-
-      if (action.type === 'unlockOnly') {
-        showToast('🔓 授权成功！加减分模式已解锁，加减完成后点击顶部锁按钮即可锁定。', 'success');
-      } else if (action.type === 'completeTask') {
-        handleCompleteTask(action.payload.childId, action.payload.taskId);
-        audio.playCoinCascade();
-        if (action.payload.event) {
-          triggerCoinShower(10, action.payload.event.clientX, action.payload.event.clientY);
-        } else {
-          triggerCoinShower(10);
-        }
-        showToast('🔓 授权成功！完成任务金币已入账，加减分模式已保持解锁状态！', 'success');
-      } else if (action.type === 'redeemReward') {
-        const success = handleRedeemReward(action.payload.childId, action.payload.rewardId);
-        if (success) {
-          audio.playSpend();
-          triggerCoinShower(5);
-          showToast('🔓 授权成功！大奖已兑换，加减分模式已保持解锁状态！', 'success');
-        }
-      } else if (action.type === 'manualAdjust') {
-        handleUpdateChildCoins(action.payload.childId, action.payload.amount, action.payload.memo);
-        triggerCoinShower(8);
-        showToast('⚡ 授权成功！金币调整完成，已保持解锁状态！', 'success');
-      } else if (action.type === 'applyPenalty') {
-        handleApplyPenalty(action.payload.childId, action.payload.penaltyId, action.payload.memo);
-        showToast('🔓 授权成功！违规扣分已生效，已保持解锁状态！', 'success');
-      } else if (action.type === 'undoTransaction') {
-        handleUndoTransaction(action.payload.transactionId);
-        showToast('🎉 授权成功！账单记录已撤销并复原，已保持解锁状态！', 'success');
-      }
-    } else {
-      audio.playError();
-      setAuthError('授权码不正确！请重新输入或在家长后台查看。');
-    }
-  };
-
   if (currentUser !== 'Jerry') {
     return (
       <div className="min-h-screen relative" id="kids-gold-rewards-auth-container">
@@ -1116,43 +868,7 @@ export default function App() {
             </div>
 
             {/* Cloud Sync Status Button */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Score Modification Lock / Unlock Toggle */}
-              {isScoreLocked ? (
-                <button
-                  id="score-lock-btn"
-                  onClick={() => {
-                    setPendingScoreAction({
-                      type: 'unlockOnly',
-                      payload: null,
-                      title: '🔓 解锁加减分操作权限',
-                      description: '请输入授权码解开锁定。解锁后可连续加减分数，加减完成后点击锁按钮即可锁定。',
-                      coinsChangeText: '解锁权限'
-                    });
-                    setAuthInput('');
-                    setAuthError('');
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-extrabold bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 transition-all duration-200 cursor-pointer shadow-xs hover:scale-105 active:scale-95 shrink-0"
-                  title="当前金币加减已锁定，点击解锁"
-                >
-                  <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>🔒 加减分已锁定 (点击解锁)</span>
-                </button>
-              ) : (
-                <button
-                  id="score-lock-btn"
-                  onClick={() => {
-                    setIsScoreLocked(true);
-                    audio.playUnlock();
-                    showToast('🔒 加减分操作已恢复锁定状态！', 'amber');
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-black bg-gradient-to-r from-emerald-500 to-teal-500 text-white border border-emerald-400 shadow-sm hover:brightness-110 transition-all duration-200 cursor-pointer animate-pulse hover:scale-105 active:scale-95 shrink-0"
-                  title="当前已解锁可自由加减分，点击锁定"
-                >
-                  <Unlock className="w-3.5 h-3.5 text-amber-200 shrink-0" />
-                  <span>🔓 加减分已解锁 (点击锁定)</span>
-                </button>
-              )}
+            <div className="flex items-center gap-2">
               {gitSyncEnabled && gitToken.trim() && gitGistId.trim() ? (
                 <div className="flex items-center gap-1.5">
                   <button
@@ -1296,9 +1012,9 @@ export default function App() {
                 transactions={transactions}
                 activeChildId={activeChildId}
                 onSelectChild={setActiveChildId}
-                onCompleteTask={onRequestCompleteTask}
-                onRedeemReward={onRequestRedeemReward}
-                onRequestUndoTransaction={onRequestUndoTransaction}
+                onCompleteTask={handleCompleteTask}
+                onRedeemReward={handleRedeemReward}
+                onApplyPenalty={handleApplyPenalty}
               />
             </motion.div>
           ) : (
@@ -1315,21 +1031,18 @@ export default function App() {
                 penalties={penalties}
                 rewards={rewards}
                 transactions={transactions}
-                authCode={authCode}
-                onUpdateAuthCode={setAuthCode}
                 onAddChild={handleAddChild}
                 onDeleteChild={handleDeleteChild}
-                onUpdateChildCoins={onRequestManualAdjust}
+                onUpdateChildCoins={handleUpdateChildCoins}
                 onAddTask={handleAddTask}
                 onDeleteTask={handleDeleteTask}
                 onAddPenalty={handleAddPenalty}
                 onDeletePenalty={handleDeletePenalty}
-                onApplyPenalty={onRequestApplyPenalty}
+                onApplyPenalty={handleApplyPenalty}
                 onAddReward={handleAddReward}
                 onDeleteReward={handleDeleteReward}
                 onMoveReward={handleMoveReward}
                 onClearTransactions={handleClearTransactions}
-                onRequestUndoTransaction={onRequestUndoTransaction}
               />
             </motion.div>
           )}
@@ -1560,102 +1273,6 @@ export default function App() {
                   </p>
                 </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* 🔒 Score Modification Authorization Modal */}
-      <AnimatePresence>
-        {pendingScoreAction && (
-          <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto" id="score-auth-modal">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl max-w-md w-full overflow-hidden p-6 sm:p-8 space-y-6 relative"
-            >
-              {/* Header with Lock Icon */}
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-br from-amber-400 to-orange-500 text-slate-900 p-3 rounded-2xl shrink-0 shadow-md">
-                  <Lock className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-800 font-display">
-                    🔒 加减分安全验证
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-bold">
-                    变更金币数值前，请输入授权码进行确认
-                  </p>
-                </div>
-              </div>
-
-              {/* Action Details Card */}
-              <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-4 space-y-1.5">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-black text-amber-950 font-display">
-                    {pendingScoreAction.title}
-                  </span>
-                  <span className="text-xs font-black font-mono bg-amber-400 text-slate-900 px-2.5 py-0.5 rounded-full shadow-xs">
-                    {pendingScoreAction.coinsChangeText}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-700 font-bold leading-relaxed">
-                  {pendingScoreAction.description}
-                </p>
-              </div>
-
-              {/* Auth Form */}
-              <form onSubmit={handleConfirmScoreAction} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-black text-slate-700">
-                    请输入加减分授权码：
-                  </label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    placeholder="请输入授权码 (默认: 8888)"
-                    value={authInput}
-                    onChange={(e) => {
-                      setAuthInput(e.target.value);
-                      if (authError) setAuthError('');
-                    }}
-                    autoFocus
-                    className="w-full text-center text-xl font-mono font-black tracking-widest py-3 px-4 bg-slate-50 border border-slate-200 focus:border-amber-400 focus:ring-4 focus:ring-amber-200 rounded-2xl outline-none transition-all"
-                  />
-                  {authError && (
-                    <p className="text-rose-600 text-[11px] font-bold mt-1.5 text-center flex items-center justify-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      {authError}
-                    </p>
-                  )}
-                </div>
-
-                <p className="text-[10px] text-slate-400 font-semibold text-center leading-relaxed">
-                  💡 默认初始授权码为 <b className="text-amber-600 font-mono">8888</b>，可在“家长控制后台-授权码设置”中修改。
-                </p>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingScoreAction(null);
-                      setAuthInput('');
-                      setAuthError('');
-                    }}
-                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl cursor-pointer transition-all"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black rounded-xl cursor-pointer transition-all shadow-lg flex items-center justify-center gap-1.5"
-                  >
-                    <Check className="w-4 h-4 text-emerald-400" />
-                    验证并确认变动
-                  </button>
-                </div>
-              </form>
             </motion.div>
           </div>
         )}

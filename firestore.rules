@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global safety catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper validation functions
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Guard rules for family space syncing Document
+    match /spaces/{spaceId} {
+      allow read: if isValidId(spaceId);
+      
+      allow create: if isValidId(spaceId)
+        && incoming().id == spaceId
+        && incoming().children is list
+        && incoming().tasks is list
+        && incoming().rewards is list
+        && incoming().transactions is list;
+        
+      allow update: if isValidId(spaceId)
+        && incoming().id == spaceId
+        && incoming().children is list
+        && incoming().tasks is list
+        && incoming().rewards is list
+        && incoming().transactions is list;
+        
+      allow delete: if false; // Protect against accidental or malicious deletions
+    }
+  }
+}

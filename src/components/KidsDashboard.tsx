@@ -21,7 +21,8 @@ import {
   Star, 
   AlertCircle,
   ShieldAlert,
-  RotateCcw
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { Child, Task, Penalty, Reward, Transaction } from '../types';
 import { audio } from '../utils/audio';
@@ -67,7 +68,7 @@ interface KidsDashboardProps {
   onSelectChild: (id: string) => void;
   onCompleteTask: (childId: string, taskId: string, event: React.MouseEvent) => void;
   onRedeemReward: (childId: string, rewardId: string) => boolean; // returns success
-  onRequestUndoTransaction?: (transactionId: string) => void;
+  onApplyPenalty?: (childId: string, penaltyId: string, customMemo?: string) => void;
 }
 
 export default function KidsDashboard({
@@ -80,11 +81,14 @@ export default function KidsDashboard({
   onSelectChild,
   onCompleteTask,
   onRedeemReward,
-  onRequestUndoTransaction,
+  onApplyPenalty,
 }: KidsDashboardProps) {
   const [activeTab, setActiveTab] = useState<'tasks' | 'shop' | 'penalties' | 'leaderboard'>('tasks');
   const [insufficientFunds, setInsufficientFunds] = useState<{ rewardId: string; needed: number } | null>(null);
   const [justCompletedTaskId, setJustCompletedTaskId] = useState<string | null>(null);
+  const [selectedPenaltyForDeduction, setSelectedPenaltyForDeduction] = useState<Penalty | null>(null);
+  const [modalChildId, setModalChildId] = useState<string>('');
+  const [modalMemo, setModalMemo] = useState<string>('');
 
   const activeChild = children.find(c => c.id === activeChildId) || null;
 
@@ -623,6 +627,22 @@ export default function KidsDashboard({
                               </div>
                             </div>
                           </div>
+
+                          <div className="pt-3 border-t border-rose-200/50 mt-4 flex justify-between items-center gap-2">
+                            <span className="text-[11px] text-rose-600/80 font-bold">违规处分项目</span>
+                            <button
+                              onClick={() => {
+                                setSelectedPenaltyForDeduction(penalty);
+                                setModalChildId(activeChildId || (children.length > 0 ? children[0].id : ''));
+                                setModalMemo('');
+                                audio.playUnlock();
+                              }}
+                              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              执行违规扣分
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -733,26 +753,22 @@ export default function KidsDashboard({
                       let amountPrefix = '';
                       let labelColor = 'text-slate-600';
 
-                      if (tx.isRevoked) {
-                        badgeColor = 'bg-slate-100 text-slate-400 border-slate-200 line-through';
-                        amountPrefix = tx.amount >= 0 ? '+' : '';
-                        labelColor = 'text-slate-400 line-through';
-                      } else if (isEarn) {
-                        badgeColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                      if (isEarn) {
+                        badgeColor = 'bg-emerald-50 text-emerald-707 border-emerald-250';
                         amountPrefix = '+';
-                        labelColor = 'text-emerald-700';
+                        labelColor = 'text-emerald-707';
                       } else if (isSpend) {
-                        badgeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                        badgeColor = 'bg-indigo-50 text-indigo-707 border-indigo-200';
                         amountPrefix = '-';
-                        labelColor = 'text-indigo-700';
+                        labelColor = 'text-indigo-707';
                       } else if (isDeduct) {
-                        badgeColor = 'bg-rose-50 text-rose-700 border-rose-200 font-bold';
+                        badgeColor = 'bg-rose-50 text-rose-700 border-rose-250 font-bold';
                         amountPrefix = '-';
                         labelColor = 'text-rose-700 font-extrabold';
                       } else if (isAdjust) {
-                        badgeColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+                        badgeColor = 'bg-indigo-50 text-indigo-707 border-indigo-200';
                         amountPrefix = tx.amount >= 0 ? '+' : '';
-                        labelColor = tx.amount >= 0 ? 'text-indigo-700' : 'text-rose-700';
+                        labelColor = tx.amount >= 0 ? 'text-indigo-707' : 'text-rose-707';
                       }
 
                       // Short dates formats: e.g. "05/30 14:23"
@@ -762,37 +778,19 @@ export default function KidsDashboard({
                         : `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')} ${String(dateObj.getHours()).padStart(2, '0')}:${String(dateObj.getMinutes()).padStart(2, '0')}`;
 
                       return (
-                        <div key={tx.id} className="text-xs flex justify-between gap-2 items-center border-b border-dashed border-slate-100 pb-3 hover:bg-slate-50/40 p-1.5 rounded-xl transition-colors">
-                          <div className="space-y-1 flex-1 min-w-0">
-                            <p className={`font-extrabold leading-normal text-[11px] md:text-xs ${tx.isRevoked ? 'line-through text-slate-400' : 'text-slate-700'}`}>
+                        <div key={tx.id} className="text-xs flex justify-between gap-3 items-start border-b border-dashed border-slate-100 pb-3 hover:bg-slate-50/40 p-1 rounded-md transition-colors">
+                          <div className="space-y-1">
+                            <p className="text-slate-700 font-extrabold leading-normal text-[11px] md:text-xs">
                               {tx.description}
                             </p>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-slate-400 font-mono font-semibold">
-                                {displayDate}
-                              </span>
-                              {tx.isRevoked && (
-                                <span className="text-[9px] bg-rose-50 text-rose-600 border border-rose-200 px-1.5 py-0.2 rounded font-extrabold">
-                                  已撤销
-                                </span>
-                              )}
-                            </div>
+                            <span className="text-[10px] text-slate-400 block font-mono font-semibold">
+                              {displayDate}
+                            </span>
                           </div>
                           
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className={`font-mono font-extrabold px-2 py-0.5 rounded-lg border text-xs ${badgeColor} ${labelColor}`}>
-                              {amountPrefix}{tx.amount}
-                            </span>
-                            {!tx.isRevoked && onRequestUndoTransaction && (
-                              <button
-                                onClick={() => onRequestUndoTransaction(tx.id)}
-                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-all cursor-pointer"
-                                title="撤销此笔变动"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
+                          <span className={`font-mono font-extrabold px-2.5 py-0.5 rounded-lg shrink-0 border ${badgeColor} ${labelColor}`}>
+                            {amountPrefix}{tx.amount}
+                          </span>
                         </div>
                       );
                     })
@@ -840,6 +838,103 @@ export default function KidsDashboard({
           )}
         </div>
       )}
+
+      {/* Execute Behavior Contract Deduction Modal */}
+      <AnimatePresence>
+        {selectedPenaltyForDeduction && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-rose-100 overflow-hidden"
+            >
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 className="font-black text-slate-800 text-base flex items-center gap-2 font-display">
+                  <ShieldAlert className="w-5 h-5 text-rose-600 animate-pulse" />
+                  执行行为契约扣分 🚨
+                </h3>
+                <button
+                  onClick={() => setSelectedPenaltyForDeduction(null)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="bg-rose-50/80 border border-rose-200/60 rounded-2xl p-4 flex items-center gap-3.5">
+                <div className="bg-rose-100 text-rose-600 p-3 rounded-2xl shrink-0 border border-rose-200">
+                  <TaskRewardIcon name={selectedPenaltyForDeduction.icon} className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-extrabold text-slate-800 text-sm truncate">{selectedPenaltyForDeduction.title}</h4>
+                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{selectedPenaltyForDeduction.description}</p>
+                </div>
+                <div className="text-rose-600 font-black text-sm bg-white px-3 py-1.5 rounded-xl border border-rose-200 shadow-2xs font-mono shrink-0">
+                  -{selectedPenaltyForDeduction.coins} 金币
+                </div>
+              </div>
+
+              <div className="space-y-3.5 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 mb-1.5 font-extrabold">1. 选择违规处分对象：</label>
+                  <select
+                    value={modalChildId}
+                    onChange={(e) => setModalChildId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 font-bold outline-none focus:border-rose-500 transition-all"
+                  >
+                    <option value="">-- 请选择受处分的小朋友 --</option>
+                    {children.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.avatar} {c.name} (当前余额: {c.coins} 金币)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 mb-1.5 font-extrabold">2. 补充说明违规事实（可选）：</label>
+                  <input
+                    type="text"
+                    value={modalMemo}
+                    onChange={(e) => setModalMemo(e.target.value)}
+                    placeholder="例：玩游戏超时20分钟 / 拿零食未归位"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 outline-none focus:border-rose-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPenaltyForDeduction(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={!modalChildId}
+                  onClick={() => {
+                    if (onApplyPenalty && modalChildId && selectedPenaltyForDeduction) {
+                      onApplyPenalty(modalChildId, selectedPenaltyForDeduction.id, modalMemo.trim());
+                    }
+                    setSelectedPenaltyForDeduction(null);
+                  }}
+                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer ${
+                    !modalChildId
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-rose-600 hover:bg-rose-700 text-white active:scale-95 shadow-rose-200'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4" />
+                  确认扣除 -{selectedPenaltyForDeduction.coins} 金币
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
