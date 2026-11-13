@@ -24,7 +24,7 @@ import {
   AlertTriangle,
   X
 } from 'lucide-react';
-import { Child, Task, Penalty, Reward, Transaction } from '../types';
+import { Child, Task, Penalty, Reward, Transaction, ApprovalRequest } from '../types';
 import { audio } from '../utils/audio';
 import { triggerCoinShower } from './CoinShower';
 
@@ -64,6 +64,7 @@ interface KidsDashboardProps {
   penalties?: Penalty[];
   rewards: Reward[];
   transactions: Transaction[];
+  requests: ApprovalRequest[];
   activeChildId: string | null;
   onSelectChild: (id: string) => void;
   onCompleteTask: (childId: string, taskId: string, event: React.MouseEvent) => void;
@@ -77,6 +78,7 @@ export default function KidsDashboard({
   penalties = [],
   rewards,
   transactions,
+  requests,
   activeChildId,
   onSelectChild,
   onCompleteTask,
@@ -91,6 +93,7 @@ export default function KidsDashboard({
   const [modalMemo, setModalMemo] = useState<string>('');
 
   const activeChild = children.find(c => c.id === activeChildId) || null;
+  const pendingRequests = requests.filter(r => r.childId === activeChildId && r.status === 'pending');
 
   // Sorting children for leaderboard (highest coin count first)
   const sortedChildren = [...children].sort((a, b) => b.coins - a.coins);
@@ -106,10 +109,10 @@ export default function KidsDashboard({
     setTimeout(() => setJustCompletedTaskId(null), 800);
 
     // 2. Play Audio Cascade
-    audio.playCoinCascade(Math.min(3, Math.ceil(task.coins / 3)));
+    // Coin animation is reserved for approved requests.
 
     // 3. Fire absolute canvas particles from click coordinate
-    triggerCoinShower(task.coins * 3, e.clientX, e.clientY);
+    // Do not celebrate before approval.
 
     // 4. Update parent state
     onCompleteTask(childId, task.id, e);
@@ -128,14 +131,9 @@ export default function KidsDashboard({
       return;
     }
 
-    // Attempt purchase
+    // Submit a request instead of spending immediately.
     const success = onRedeemReward(childId, reward.id);
-    if (success) {
-      // Play purchase chimes
-      audio.playSpend();
-      // Small sparkle sprinkle
-      triggerCoinShower(5, window.innerWidth / 2, window.innerHeight / 2);
-    }
+    if (success) audio.playUnlock();
   };
 
   // Helper translated styles for categories
@@ -386,7 +384,7 @@ export default function KidsDashboard({
                 >
                   <div className="flex justify-between items-center px-1">
                     <div>
-                      <h3 className="font-extrabold text-slate-800 text-base font-display">完成日常，领取闪亮金币 🌟</h3>
+                      <h3 className="font-extrabold text-slate-800 text-base font-display">完成日常，申请金币奖励 🌟</h3>
                       <p className="text-xs text-slate-400 font-medium">做完日常家务和习惯培养，点击“我做完啦”，闪亮金币就会掉落到你的金库里！</p>
                     </div>
                   </div>
@@ -563,7 +561,7 @@ export default function KidsDashboard({
                                 }`}
                               >
                                 <Gift className="w-4 h-4 font-bold" />
-                                立即积分兑换
+                                申请兑换（待审核）
                               </motion.button>
                             </div>
                           </div>
