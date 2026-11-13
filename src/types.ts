@@ -49,6 +49,12 @@ export interface Transaction {
   timestamp: string; // ISO format
 }
 
+export interface ApprovalRequest {
+  id: string; childId: string; childName: string;
+  kind: 'earn' | 'spend'; itemId: string; title: string;
+  amount: number; status: 'pending' | 'approved' | 'rejected';
+  createdAt: string; reviewedAt?: string;
+}
 export interface AppState {
   children: Child[];
   tasks: Task[];
