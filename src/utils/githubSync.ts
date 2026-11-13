@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Child, Task, Penalty, Reward, Transaction } from '../types';
+import { Child, Task, Penalty, Reward, Transaction, ApprovalRequest } from '../types';
 
 export interface SyncDataPayload {
   children: Child[];
@@ -11,6 +11,7 @@ export interface SyncDataPayload {
   penalties?: Penalty[];
   rewards: Reward[];
   transactions: Transaction[];
+  requests?: ApprovalRequest[];
   updatedAt: string;
   deviceInfo?: string;
 }
