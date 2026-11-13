@@ -628,18 +628,7 @@ export default function KidsDashboard({
 
                           <div className="pt-3 border-t border-rose-200/50 mt-4 flex justify-between items-center gap-2">
                             <span className="text-[11px] text-rose-600/80 font-bold">违规处分项目</span>
-                            <button
-                              onClick={() => {
-                                setSelectedPenaltyForDeduction(penalty);
-                                setModalChildId(activeChildId || (children.length > 0 ? children[0].id : ''));
-                                setModalMemo('');
-                                audio.playUnlock();
-                              }}
-                              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-black rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                            >
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              执行违规扣分
-                            </button>
+                            <span className="text-xs font-bold text-rose-600">仅家长后台可执行扣分</span>
                           </div>
                         </div>
                       ))}
