@@ -34,7 +34,7 @@ import {
   getGist,
   SyncDataPayload
 } from './utils/githubSync';
-import { Child, Task, Penalty, Reward, Transaction } from './types';
+import { Child, Task, Penalty, Reward, Transaction, ApprovalRequest } from './types';
 import { audio } from './utils/audio';
 import CoinShower, { triggerCoinShower } from './components/CoinShower';
 import KidsDashboard from './components/KidsDashboard';
@@ -118,6 +118,24 @@ export default function App() {
   });
 
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  const [requests, setRequests] = useState<ApprovalRequest[]>(() => {
+    try { return JSON.parse(localStorage.getItem('kids-coins-requests') || '[]'); }
+    catch { return []; }
+  });
+  const [parentUnlocked, setParentUnlocked] = useState(false);
+  const unlockParent = () => {
+    let pin = localStorage.getItem('kids-coins-parent-pin');
+    if (!pin) {
+      const first = window.prompt('首次设置家长密码（至少4位）');
+      if (!first || first.length < 4) return false;
+      if (window.prompt('再次输入家长密码') !== first) { window.alert('两次密码不一致'); return false; }
+      localStorage.setItem('kids-coins-parent-pin', first);
+    } else if (window.prompt('输入家长密码') !== pin) {
+      window.alert('密码不正确'); return false;
+    }
+    setParentUnlocked(true);
+    return true;
+  };
 
   const [currentUser, setCurrentUser] = useState<string>(() => {
     return localStorage.getItem('kids-coins-user') || '';
@@ -169,6 +187,8 @@ export default function App() {
       setToast(prev => prev?.message === message ? null : prev);
     }, 5000);
   };
+
+  useEffect(() => { localStorage.setItem('kids-coins-requests', JSON.stringify(requests)); }, [requests]);
 
   // Sync state modifications to local storage
   useEffect(() => {
@@ -227,6 +247,7 @@ export default function App() {
     if (Array.isArray(payload.penalties)) setPenalties(payload.penalties);
     if (Array.isArray(payload.rewards)) setRewards(payload.rewards);
     if (Array.isArray(payload.transactions)) setTransactions(payload.transactions);
+    if (Array.isArray(payload.requests)) setRequests(payload.requests);
     
     const nowStr = new Date().toLocaleString();
     setGitLastSynced(nowStr);
@@ -259,7 +280,7 @@ export default function App() {
 
   // Push local data to Gist
   const pushToGist = async (
-    overrideData?: { children: Child[], tasks: Task[], penalties?: Penalty[], rewards: Reward[], transactions: Transaction[] },
+    overrideData?: { children: Child[], tasks: Task[], penalties?: Penalty[], rewards: Reward[], transactions: Transaction[], requests?: ApprovalRequest[] },
     token = gitToken,
     gistId = gitGistId
   ) => {
@@ -278,6 +299,7 @@ export default function App() {
         penalties: overrideData?.penalties ?? penalties,
         rewards: overrideData?.rewards ?? rewards,
         transactions: overrideData?.transactions ?? transactions,
+        requests: overrideData?.requests ?? requests,
         updatedAt: new Date().toISOString(),
         deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 50) : 'Web'
       };
@@ -310,7 +332,7 @@ export default function App() {
     }, 2500);
 
     return () => clearTimeout(timer);
-  }, [children, tasks, penalties, rewards, transactions, gitSyncEnabled, gitToken, gitGistId]);
+  }, [children, tasks, penalties, rewards, transactions, requests, gitSyncEnabled, gitToken, gitGistId]);
 
   // Initial load or Gist connection activation
   useEffect(() => {
@@ -534,74 +556,51 @@ export default function App() {
   // Children Handlers and Mutators (Mark isDirtyRef)
   // ----------------------------------------------------
   
-  // Complete a task
-  const handleCompleteTask = (childId: string, taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
+  const queueRequest = (childId: string, itemId: string, kind: 'earn' | 'spend'): boolean => {
+    const child = children.find(c => c.id === childId);
+    const item = kind === 'earn' ? tasks.find(t => t.id === itemId) : rewards.find(r => r.id === itemId);
+    if (!child || !item) return false;
+    if (kind === 'spend' && child.coins < item.coins) return false;
+    if (requests.some(r => r.childId === childId && r.itemId === itemId && r.kind === kind && r.status === 'pending')) {
+      showToast('这项申请已经在等待家长审核', 'amber'); return false;
+    }
     isDirtyRef.current = true;
-    setChildren(prev => {
-      const idx = prev.findIndex(c => c.id === childId);
-      if (idx === -1) return prev;
-      const copy = [...prev];
-      copy[idx] = {
-        ...copy[idx],
-        coins: copy[idx].coins + task.coins,
-        totalEarned: copy[idx].totalEarned + task.coins
-      };
-      
-      const newTx: Transaction = {
-        id: `tx-earn-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        childId,
-        childName: copy[idx].name,
-        type: 'earn',
-        amount: task.coins,
-        description: `完成了日常任务“${task.title}”并领取了金币奖励！`,
-        timestamp: new Date().toISOString()
-      };
-      setTransactions(prevTx => [newTx, ...prevTx]);
-
-      return copy;
-    });
+    setRequests(prev => [{
+      id: 'req-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      childId, childName: child.name, itemId, kind, title: item.title,
+      amount: item.coins, status: 'pending', createdAt: new Date().toISOString()
+    }, ...prev]);
+    showToast('申请已提交，等待家长审核');
+    return true;
   };
-
-  // Redeem a reward
-  const handleRedeemReward = (childId: string, rewardId: string): boolean => {
-    const reward = rewards.find(r => r.id === rewardId);
-    if (!reward) return false;
-
-    let possible = false;
-
-    setChildren(prev => {
-      const idx = prev.findIndex(c => c.id === childId);
-      if (idx === -1) return prev;
-      if (prev[idx].coins < reward.coins) return prev;
-
-      possible = true;
-      isDirtyRef.current = true;
-
-      const copy = [...prev];
-      copy[idx] = {
-        ...copy[idx],
-        coins: copy[idx].coins - reward.coins,
-        totalSpent: copy[idx].totalSpent + reward.coins
-      };
-
-      const newTx: Transaction = {
-        id: `tx-spend-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        childId,
-        childName: copy[idx].name,
-        type: 'spend',
-        amount: reward.coins,
-        description: `在商店中兑换了奖励商品：${reward.title}`,
-        timestamp: new Date().toISOString()
-      };
-      setTransactions(prevTx => [newTx, ...prevTx]);
-
-      return copy;
-    });
-
-    return possible;
+  const handleCompleteTask = (childId: string, taskId: string) => { queueRequest(childId, taskId, 'earn'); };
+  const handleRedeemReward = (childId: string, rewardId: string): boolean => queueRequest(childId, rewardId, 'spend');
+  const reviewRequest = (id: string, approved: boolean) => {
+    if (!parentUnlocked) return;
+    const req = requests.find(r => r.id === id && r.status === 'pending');
+    if (!req) return;
+    const child = children.find(c => c.id === req.childId);
+    if (!child) { showToast('未找到孩子', 'error'); return; }
+    if (approved && req.kind === 'spend' && child.coins < req.amount) {
+      showToast('当前积分不足，无法批准兑换', 'amber'); return;
+    }
+    isDirtyRef.current = true;
+    if (approved) {
+      setChildren(prev => prev.map(c => c.id !== req.childId ? c : {
+        ...c, coins: c.coins + (req.kind === 'earn' ? req.amount : -req.amount),
+        totalEarned: c.totalEarned + (req.kind === 'earn' ? req.amount : 0),
+        totalSpent: c.totalSpent + (req.kind === 'spend' ? req.amount : 0)
+      }));
+      setTransactions(prev => [{
+        id: 'tx-approved-' + req.id, childId: req.childId, childName: req.childName,
+        type: req.kind === 'earn' ? 'earn' : 'spend', amount: req.amount,
+        description: '家长审核通过：' + req.title, timestamp: new Date().toISOString()
+      }, ...prev]);
+    }
+    setRequests(prev => prev.map(r => r.id === id ? {
+      ...r, status: approved ? 'approved' : 'rejected', reviewedAt: new Date().toISOString()
+    } : r));
+    showToast(approved ? '已审核通过并更新积分' : '已拒绝申请', approved ? 'success' : 'amber');
   };
 
   // Add child
@@ -935,6 +934,7 @@ export default function App() {
                 id="goto-kids-lobby-btn"
                 onClick={() => {
                   setIsAdminMode(false);
+                  setParentUnlocked(false);
                   audio.playUnlock();
                 }}
                 className={`flex-1 md:flex-initial px-4 py-2.5 rounded-[9px] flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer ${
@@ -950,6 +950,7 @@ export default function App() {
               <button
                 id="goto-parent-backoffice-btn"
                 onClick={() => {
+                  if (!parentUnlocked && !unlockParent()) return;
                   setIsAdminMode(true);
                   audio.playUnlock();
                 }}
@@ -1014,7 +1015,8 @@ export default function App() {
                 onSelectChild={setActiveChildId}
                 onCompleteTask={handleCompleteTask}
                 onRedeemReward={handleRedeemReward}
-                onApplyPenalty={handleApplyPenalty}
+                requests={requests}
+                onApplyPenalty={undefined}
               />
             </motion.div>
           ) : (
@@ -1025,6 +1027,22 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.2 }}
             >
+              <>
+              <section className="mb-5 rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
+                <h2 className="font-black text-lg mb-3">待审核申请 ({requests.filter(r => r.status === 'pending').length})</h2>
+                {requests.filter(r => r.status === 'pending').length === 0 && <p className="text-slate-500 text-sm">暂无待审核申请</p>}
+                {requests.filter(r => r.status === 'pending').map(r => (
+                  <div key={r.id} className="flex flex-wrap items-center gap-3 justify-between border-t py-3">
+                    <div><div className="font-semibold">{r.childName} · {r.title}</div>
+                      <div className="text-xs text-slate-500">{r.kind === 'earn' ? '申请加分 +' : '申请兑换 -'}{r.amount} · {new Date(r.createdAt).toLocaleString()}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => reviewRequest(r.id, true)} className="rounded-lg bg-emerald-600 px-4 py-2 text-white font-bold">批准</button>
+                      <button onClick={() => reviewRequest(r.id, false)} className="rounded-lg bg-slate-200 px-4 py-2 font-bold">拒绝</button>
+                    </div>
+                  </div>
+                ))}
+              </section>
               <ParentConsole
                 children={children}
                 tasks={tasks}
@@ -1044,6 +1062,7 @@ export default function App() {
                 onMoveReward={handleMoveReward}
                 onClearTransactions={handleClearTransactions}
               />
+              </>
             </motion.div>
           )}
         </AnimatePresence>
