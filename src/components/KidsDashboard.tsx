@@ -22,7 +22,10 @@ import {
   AlertCircle,
   ShieldAlert,
   AlertTriangle,
-  X
+  X,
+  RefreshCw,
+  Pencil,
+  PartyPopper
 } from 'lucide-react';
 import { Child, Task, Penalty, Reward, Transaction, ApprovalRequest } from '../types';
 import { audio } from '../utils/audio';
@@ -70,6 +73,11 @@ interface KidsDashboardProps {
   onCompleteTask: (childId: string, taskId: string, event: React.MouseEvent) => void;
   onRedeemReward: (childId: string, rewardId: string) => boolean; // returns success
   onApplyPenalty?: (childId: string, penaltyId: string, customMemo?: string) => void;
+  onUpdateAvatar: (childId: string, avatar: string) => void;
+  onRefreshScores: () => Promise<void>;
+  onRefreshRequests: () => Promise<void>;
+  isRefreshingScores: boolean;
+  isRefreshingRequests: boolean;
 }
 
 export default function KidsDashboard({
@@ -84,6 +92,11 @@ export default function KidsDashboard({
   onCompleteTask,
   onRedeemReward,
   onApplyPenalty,
+  onUpdateAvatar,
+  onRefreshScores,
+  onRefreshRequests,
+  isRefreshingScores,
+  isRefreshingRequests,
 }: KidsDashboardProps) {
   const [activeTab, setActiveTab] = useState<'tasks' | 'shop' | 'penalties' | 'leaderboard'>('tasks');
   const [insufficientFunds, setInsufficientFunds] = useState<{ rewardId: string; needed: number } | null>(null);
@@ -91,6 +104,9 @@ export default function KidsDashboard({
   const [selectedPenaltyForDeduction, setSelectedPenaltyForDeduction] = useState<Penalty | null>(null);
   const [modalChildId, setModalChildId] = useState<string>('');
   const [modalMemo, setModalMemo] = useState<string>('');
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
+  const [submittedReward, setSubmittedReward] = useState<Reward | null>(null);
 
   const activeChild = children.find(c => c.id === activeChildId) || null;
   const pendingRequests = requests.filter(r => r.childId === activeChildId && r.status === 'pending');
@@ -121,6 +137,11 @@ export default function KidsDashboard({
   const handleRedeemClick = (childId: string, reward: Reward) => {
     if (!activeChild) return;
 
+    if (pendingRequests.some(request => request.kind === 'spend' && request.itemId === reward.id)) {
+      audio.playError();
+      return;
+    }
+
     if (activeChild.coins < reward.coins) {
       // Plays error buzzer
       audio.playError();
@@ -132,9 +153,22 @@ export default function KidsDashboard({
     }
 
     // Submit a request instead of spending immediately.
-    const success = onRedeemReward(childId, reward.id);
-    if (success) audio.playUnlock();
+    setSelectedReward(reward);
   };
+
+  const confirmRedemption = () => {
+    if (!activeChild || !selectedReward) return;
+    const reward = selectedReward;
+    const success = onRedeemReward(activeChild.id, reward.id);
+    setSelectedReward(null);
+    if (success) {
+      setSubmittedReward(reward);
+      audio.playTriumph();
+      triggerCoinShower(18);
+    }
+  };
+
+  const AVATARS = ['🦊', '🐱', '🐼', '🐯', '🐨', '🦁', '🦖', '🦄', '🐰', '🐷', '🐸', '🐙', '🐧', '🐬', '🚀', '🌟'];
 
   // Helper translated styles for categories
   const getTaskCategoryBadge = (cat: string) => {
@@ -261,6 +295,13 @@ export default function KidsDashboard({
                   <h2 className="text-2xl sm:text-3xl font-black font-display tracking-tight flex items-center gap-2.5">
                     <span>{activeChild.avatar}</span> {activeChild.name}，你好！
                   </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowAvatarPicker(true)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-extrabold text-amber-200 transition hover:bg-white/10"
+                  >
+                    <Pencil className="w-3.5 h-3.5" /> 更换我的头像
+                  </button>
                   <p className="text-slate-400 text-xs sm:text-sm leading-relaxed max-w-md pt-0.5 font-semibold">
                     今天也要乖乖自律、自主劳动、快乐学习，积累更多帅气金币换取礼特权零用钱奖励哟～ 🪐
                   </p>
@@ -304,6 +345,26 @@ export default function KidsDashboard({
                   </span>
                   <span className="text-lg font-black font-mono text-orange-400 mt-1">{activeChild.totalSpent} <b className="font-sans text-xs">金币</b></span>
                 </div>
+              </div>
+              <div className="relative z-10 mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={onRefreshScores}
+                  disabled={isRefreshingScores}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-2.5 text-xs font-extrabold text-emerald-200 transition hover:bg-emerald-400/20 disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshingScores ? 'animate-spin' : ''}`} />
+                  刷新最新积分
+                </button>
+                <button
+                  type="button"
+                  onClick={onRefreshRequests}
+                  disabled={isRefreshingRequests}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-indigo-400/20 bg-indigo-400/10 px-4 py-2.5 text-xs font-extrabold text-indigo-200 transition hover:bg-indigo-400/20 disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshingRequests ? 'animate-spin' : ''}`} />
+                  刷新审核申请 {pendingRequests.length > 0 ? `(${pendingRequests.length})` : ''}
+                </button>
               </div>
             </div>
 
@@ -385,7 +446,7 @@ export default function KidsDashboard({
                   <div className="flex justify-between items-center px-1">
                     <div>
                       <h3 className="font-extrabold text-slate-800 text-base font-display">完成日常，申请金币奖励 🌟</h3>
-                      <p className="text-xs text-slate-400 font-medium">做完日常家务和习惯培养，点击“我做完啦”，闪亮金币就会掉落到你的金库里！</p>
+                      <p className="text-xs text-slate-400 font-medium">做完日常家务和习惯培养后提交申请，家长审核通过才会把金币放入金库。</p>
                     </div>
                   </div>
 
@@ -444,12 +505,12 @@ export default function KidsDashboard({
                                 {isCompleting ? (
                                   <>
                                     <Sparkles className="w-4 h-4 animate-bounce" />
-                                    金币落袋啦！ 🎉
+                                    申请已提交，等待审核
                                   </>
                                 ) : (
                                   <>
                                     <CheckCircle className="w-4 h-4 font-bold" />
-                                    我做完啦 （结算金币）
+                                    我做完啦（申请金币）
                                   </>
                                 )}
                               </motion.button>
@@ -513,12 +574,18 @@ export default function KidsDashboard({
                       {rewards.map((reward) => {
                         const label = getRewardCategoryLabel(reward.category);
                         const hasEnough = activeChild.coins >= reward.coins;
+                        const isPending = pendingRequests.some(request => request.kind === 'spend' && request.itemId === reward.id);
                         return (
-                          <div
+                          <motion.button
                             key={reward.id}
-                            className={`bg-white/80 backdrop-blur-md rounded-[1.5rem] p-5 border transition-all duration-300 flex flex-col justify-between ${
+                            type="button"
+                            whileHover={{ y: -3, scale: 1.01 }}
+                            whileTap={{ scale: 0.985 }}
+                            onClick={() => handleRedeemClick(activeChild.id, reward)}
+                            aria-label={`${isPending ? '等待审核' : '申请兑换'} ${reward.title}`}
+                            className={`w-full text-left bg-white/80 backdrop-blur-md rounded-[1.5rem] p-5 border transition-all duration-300 flex flex-col justify-between cursor-pointer focus:outline-none focus:ring-4 focus:ring-indigo-200 ${
                               hasEnough 
-                                ? 'border-indigo-200/60 hover:border-indigo-400/50 hover:shadow-[0_12px_30px_rgba(99,102,241,0.06)] shadow-inner bg-indigo-50/5' 
+                                ? 'border-indigo-300/70 hover:border-indigo-500 hover:shadow-[0_16px_35px_rgba(99,102,241,0.14)] shadow-inner bg-indigo-50/5'
                                 : 'border-slate-200/50 opacity-80 shadow-none'
                             }`}
                           >
@@ -549,22 +616,17 @@ export default function KidsDashboard({
                               </div>
                             </div>
 
-                            <div className="mt-5 pt-4 border-t border-slate-100/60 flex items-center justify-end">
-                              <motion.button
-                                whileHover={{ scale: 1.025 }}
-                                whileTap={{ scale: 0.975 }}
-                                onClick={() => handleRedeemClick(activeChild.id, reward)}
-                                className={`w-full py-2.5 px-4 rounded-xl font-extrabold text-xs md:text-sm flex items-center justify-center gap-2 shadow-sm transition-all duration-350 cursor-pointer ${
-                                  hasEnough
-                                    ? 'bg-indigo-650 hover:bg-indigo-700 text-white hover:shadow-indigo-100/30 shadow-indigo-100/10'
-                                    : 'bg-slate-100 hover:bg-slate-200/80 text-slate-500 border border-slate-200/70'
-                                }`}
-                              >
-                                <Gift className="w-4 h-4 font-bold" />
-                                申请兑换（待审核）
-                              </motion.button>
+                            <div className={`mt-5 pt-4 border-t border-slate-100/60 rounded-xl py-3 px-4 font-extrabold text-xs md:text-sm flex items-center justify-center gap-2 shadow-sm ${
+                              isPending
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                : hasEnough
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 text-slate-500 border border-slate-200/70'
+                            }`}>
+                              {isPending ? <Clock className="w-4 h-4" /> : <Gift className="w-4 h-4" />}
+                              {isPending ? '申请已提交 · 等待家长审核' : hasEnough ? '点击整张卡片申请兑换' : '积分不足 · 点击查看还差多少'}
                             </div>
-                          </div>
+                          </motion.button>
                         );
                       })}
                     </div>
@@ -825,6 +887,91 @@ export default function KidsDashboard({
           )}
         </div>
       )}
+
+      <AnimatePresence>
+        {showAvatarPicker && activeChild && (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowAvatarPicker(false)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 18 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 18 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800">选择新的专属头像</h3>
+                  <p className="text-xs text-slate-500 mt-1">保存后会通过 Gist 同步到其他设备。</p>
+                </div>
+                <button onClick={() => setShowAvatarPicker(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="mt-5 grid grid-cols-4 gap-3">
+                {AVATARS.map(avatar => (
+                  <button
+                    key={avatar}
+                    type="button"
+                    onClick={() => {
+                      onUpdateAvatar(activeChild.id, avatar);
+                      setShowAvatarPicker(false);
+                    }}
+                    className={`rounded-2xl border p-3 text-3xl transition hover:scale-110 ${activeChild.avatar === avatar ? 'border-amber-400 bg-amber-100 ring-2 ring-amber-200' : 'border-slate-200 bg-slate-50 hover:bg-amber-50'}`}
+                  >
+                    {avatar}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {selectedReward && activeChild && (
+          <div className="fixed inset-0 z-50 bg-indigo-950/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedReward(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.82, rotate: -2 }}
+              animate={{ opacity: 1, scale: 1, rotate: 0 }}
+              exit={{ opacity: 0, scale: 0.88, y: 16 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-md overflow-hidden rounded-[2rem] border border-amber-200 bg-white shadow-2xl"
+            >
+              <div className="bg-gradient-to-br from-indigo-700 via-violet-700 to-amber-500 p-7 text-center text-white">
+                <motion.div animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.12, 1] }} transition={{ duration: 1.1 }} className="mx-auto text-6xl">🎁</motion.div>
+                <p className="mt-3 text-xs font-black tracking-[0.25em] text-amber-100">兑换愿望确认</p>
+                <h3 className="mt-2 text-xl font-black">{selectedReward.title}</h3>
+              </div>
+              <div className="space-y-5 p-6">
+                <p className="text-sm leading-relaxed text-slate-600">{selectedReward.description}</p>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center">
+                  <div className="font-mono text-2xl font-black text-amber-700">{selectedReward.coins} 金币</div>
+                  <p className="mt-1 text-[11px] font-bold text-amber-700">现在只提交申请，不会立即扣分；家长批准后才正式生效。</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setSelectedReward(null)} className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-extrabold text-slate-600 hover:bg-slate-200">再想一想</button>
+                  <button onClick={confirmRedemption} className="rounded-xl bg-indigo-600 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-indigo-200 hover:bg-indigo-700">确认申请兑换</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {submittedReward && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSubmittedReward(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.6, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ type: 'spring', stiffness: 220, damping: 18 }}
+              onClick={(event) => event.stopPropagation()}
+              className="w-full max-w-sm rounded-[2rem] border-4 border-amber-300 bg-gradient-to-b from-amber-50 to-white p-7 text-center shadow-2xl"
+            >
+              <PartyPopper className="mx-auto h-14 w-14 text-amber-500" />
+              <h3 className="mt-4 text-2xl font-black text-slate-800">愿望申请已送达！</h3>
+              <p className="mt-2 text-sm font-bold text-indigo-700">{submittedReward.title}</p>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">金币还在你的账户里。等家长审核通过后，系统才会扣除积分并记入流水。</p>
+              <button onClick={() => setSubmittedReward(null)} className="mt-6 w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-black text-white shadow-lg shadow-amber-200 hover:bg-amber-600">收到，等待好消息 ✨</button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Execute Behavior Contract Deduction Modal */}
       <AnimatePresence>
