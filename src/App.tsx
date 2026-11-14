@@ -161,11 +161,14 @@ export default function App() {
   const [syncErrorMessage, setSyncErrorMessage] = useState<string>('');
   const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
   const [isSyncLoading, setIsSyncLoading] = useState<boolean>(false);
+  const [isRefreshingScores, setIsRefreshingScores] = useState(false);
+  const [isRefreshingRequests, setIsRefreshingRequests] = useState(false);
   const [copiedGistId, setCopiedGistId] = useState<boolean>(false);
 
   // Sync Mutation Protection Flags
   const isDirtyRef = useRef<boolean>(false);
   const isPullingRef = useRef<boolean>(false);
+  const processingRequestIdsRef = useRef<Set<string>>(new Set());
 
   // Custom non-blocking interactive confirmation modal state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -382,6 +385,11 @@ export default function App() {
     const cleanToken = gitToken.trim();
     const cleanGistId = gitGistId.trim();
 
+    if (isDirtyRef.current) {
+      showToast('本机修改正在保存，请稍等片刻再刷新。', 'amber');
+      return;
+    }
+
     if (!cleanToken || !cleanGistId) {
       showToast('请先填写有效的 GitHub Token 与 Gist ID。', 'amber');
       return;
@@ -402,6 +410,57 @@ export default function App() {
       showToast(`刷新同步失败: ${err.message || err}`, 'error');
     } finally {
       setIsSyncLoading(false);
+    }
+  };
+
+  const canRefreshFromCloud = () => {
+    if (!gitSyncEnabled || !gitToken.trim() || !gitGistId.trim()) {
+      showToast('请先在顶部绑定 Gist 云同步。', 'amber');
+      return false;
+    }
+    if (isDirtyRef.current) {
+      showToast('本机修改正在保存，请稍等片刻再刷新。', 'amber');
+      return false;
+    }
+    return true;
+  };
+
+  const handleRefreshScores = async () => {
+    if (!canRefreshFromCloud()) return;
+    setIsRefreshingScores(true);
+    try {
+      const data = await pullFromGist();
+      if (!data) {
+        showToast('云端暂时没有可读取的积分数据。', 'amber');
+        return;
+      }
+      isPullingRef.current = true;
+      if (Array.isArray(data.children)) setChildren(data.children);
+      if (Array.isArray(data.transactions)) setTransactions(data.transactions);
+      setGitLastSynced(new Date().toLocaleString());
+      audio.playCoin();
+      showToast('最新积分和交易流水已刷新。', 'success');
+    } finally {
+      setIsRefreshingScores(false);
+    }
+  };
+
+  const handleRefreshRequests = async () => {
+    if (!canRefreshFromCloud()) return;
+    setIsRefreshingRequests(true);
+    try {
+      const data = await pullFromGist();
+      if (!data) {
+        showToast('云端暂时没有可读取的申请数据。', 'amber');
+        return;
+      }
+      isPullingRef.current = true;
+      setRequests(Array.isArray(data.requests) ? data.requests : []);
+      setGitLastSynced(new Date().toLocaleString());
+      audio.playUnlock();
+      showToast('审核申请及处理状态已刷新。', 'success');
+    } finally {
+      setIsRefreshingRequests(false);
     }
   };
 
@@ -479,8 +538,10 @@ export default function App() {
       const payload: SyncDataPayload = {
         children,
         tasks,
+        penalties,
         rewards,
         transactions,
+        requests,
         updatedAt: new Date().toISOString(),
         deviceInfo: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 50) : 'Web'
       };
@@ -577,6 +638,7 @@ export default function App() {
   const handleRedeemReward = (childId: string, rewardId: string): boolean => queueRequest(childId, rewardId, 'spend');
   const reviewRequest = (id: string, approved: boolean) => {
     if (!parentUnlocked) return;
+    if (processingRequestIdsRef.current.has(id)) return;
     const req = requests.find(r => r.id === id && r.status === 'pending');
     if (!req) return;
     const child = children.find(c => c.id === req.childId);
@@ -584,6 +646,7 @@ export default function App() {
     if (approved && req.kind === 'spend' && child.coins < req.amount) {
       showToast('当前积分不足，无法批准兑换', 'amber'); return;
     }
+    processingRequestIdsRef.current.add(id);
     isDirtyRef.current = true;
     if (approved) {
       setChildren(prev => prev.map(c => c.id !== req.childId ? c : {
@@ -591,16 +654,48 @@ export default function App() {
         totalEarned: c.totalEarned + (req.kind === 'earn' ? req.amount : 0),
         totalSpent: c.totalSpent + (req.kind === 'spend' ? req.amount : 0)
       }));
-      setTransactions(prev => [{
-        id: 'tx-approved-' + req.id, childId: req.childId, childName: req.childName,
-        type: req.kind === 'earn' ? 'earn' : 'spend', amount: req.amount,
-        description: '家长审核通过：' + req.title, timestamp: new Date().toISOString()
-      }, ...prev]);
+      setTransactions(prev => prev.some(tx => tx.id === 'tx-approved-' + req.id) ? prev : [{
+          id: 'tx-approved-' + req.id, childId: req.childId, childName: req.childName,
+          type: req.kind === 'earn' ? 'earn' : 'spend', amount: req.amount,
+          description: '家长审核通过：' + req.title, timestamp: new Date().toISOString()
+        }, ...prev]);
     }
     setRequests(prev => prev.map(r => r.id === id ? {
       ...r, status: approved ? 'approved' : 'rejected', reviewedAt: new Date().toISOString()
     } : r));
     showToast(approved ? '已审核通过并更新积分' : '已拒绝申请', approved ? 'success' : 'amber');
+  };
+
+  const handleUpdateChildAvatar = (childId: string, avatar: string) => {
+    if (!avatar.trim()) return;
+    isDirtyRef.current = true;
+    setChildren(prev => prev.map(child => child.id === childId ? { ...child, avatar } : child));
+    audio.playUnlock();
+    showToast('新头像已保存，并会同步到 Gist。', 'success');
+  };
+
+  const handleAwardTask = (childId: string, taskId: string) => {
+    const child = children.find(item => item.id === childId);
+    const task = tasks.find(item => item.id === taskId);
+    if (!child || !task) return;
+    isDirtyRef.current = true;
+    setChildren(prev => prev.map(item => item.id === childId ? {
+      ...item,
+      coins: item.coins + task.coins,
+      totalEarned: item.totalEarned + task.coins
+    } : item));
+    setTransactions(prev => [{
+      id: `tx-parent-task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      childId,
+      childName: child.name,
+      type: 'earn',
+      amount: task.coins,
+      description: `家长按预设任务直接奖励：${task.title}`,
+      timestamp: new Date().toISOString()
+    }, ...prev]);
+    audio.playTriumph();
+    triggerCoinShower(Math.min(task.coins * 2, 30));
+    showToast(`已为 ${child.name} 按“${task.title}”奖励 ${task.coins} 金币。`, 'success');
   };
 
   // Add child
@@ -1016,6 +1111,11 @@ export default function App() {
                 onCompleteTask={handleCompleteTask}
                 onRedeemReward={handleRedeemReward}
                 requests={requests}
+                onUpdateAvatar={handleUpdateChildAvatar}
+                onRefreshScores={handleRefreshScores}
+                onRefreshRequests={handleRefreshRequests}
+                isRefreshingScores={isRefreshingScores}
+                isRefreshingRequests={isRefreshingRequests}
                 onApplyPenalty={undefined}
               />
             </motion.div>
@@ -1052,6 +1152,7 @@ export default function App() {
                 onAddChild={handleAddChild}
                 onDeleteChild={handleDeleteChild}
                 onUpdateChildCoins={handleUpdateChildCoins}
+                onAwardTask={handleAwardTask}
                 onAddTask={handleAddTask}
                 onDeleteTask={handleDeleteTask}
                 onAddPenalty={handleAddPenalty}

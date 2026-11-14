@@ -43,6 +43,7 @@ interface ParentConsoleProps {
   onAddChild: (name: string, avatar: string) => void;
   onDeleteChild: (id: string) => void;
   onUpdateChildCoins: (id: string, amount: number, memo: string) => void;
+  onAwardTask: (childId: string, taskId: string) => void;
   
   onAddTask: (task: Omit<Task, 'id'>) => void;
   onDeleteTask: (id: string) => void;
@@ -67,6 +68,7 @@ export default function ParentConsole({
   onAddChild,
   onDeleteChild,
   onUpdateChildCoins,
+  onAwardTask,
   onAddTask,
   onDeleteTask,
   onAddPenalty,
@@ -98,6 +100,8 @@ export default function ParentConsole({
   const [adjustAmount, setAdjustAmount] = useState<number>(5);
   const [adjustMemo, setAdjustMemo] = useState<string>('');
   const [coinAdjustSuccess, setCoinAdjustSuccess] = useState<string | null>(null);
+  const [awardTargetChildId, setAwardTargetChildId] = useState('');
+  const [awardTaskId, setAwardTaskId] = useState('');
 
   // New Task Form States
   const [taskTitle, setTaskTitle] = useState<string>('');
@@ -209,6 +213,16 @@ export default function ParentConsole({
     triggerCoinShower(Math.abs(adjustAmount) * 2);
     setCoinAdjustSuccess('金币额度调整成功！');
     setAdjustMemo('');
+    setTimeout(() => setCoinAdjustSuccess(null), 3000);
+  };
+
+  const handleAwardTaskSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!awardTargetChildId || !awardTaskId) return;
+    const child = children.find(item => item.id === awardTargetChildId);
+    const task = tasks.find(item => item.id === awardTaskId);
+    onAwardTask(awardTargetChildId, awardTaskId);
+    setCoinAdjustSuccess(`已按“${task?.title || '预设任务'}”为 ${child?.name || '小朋友'} 直接加分。`);
     setTimeout(() => setCoinAdjustSuccess(null), 3000);
   };
 
@@ -694,6 +708,43 @@ export default function ParentConsole({
             exit={{ opacity: 0, y: -10 }}
             className="grid grid-cols-1 lg:grid-cols-12 gap-8"
           >
+            <div className="lg:col-span-12 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-amber-50 p-5 shadow-sm">
+              <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+                <div className="lg:w-1/3">
+                  <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-amber-500" /> 按预设任务直接奖励
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">家长确认孩子已完成任务后可直接加分，并自动写入交易流水，无需再次审核。</p>
+                </div>
+                <form onSubmit={handleAwardTaskSubmit} className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_1.4fr_auto] gap-3 text-xs">
+                  <select
+                    value={awardTargetChildId}
+                    onChange={(event) => setAwardTargetChildId(event.target.value)}
+                    className="bg-white border border-emerald-200 rounded-xl p-3 font-bold text-slate-700 outline-none"
+                    required
+                  >
+                    <option value="">选择小朋友</option>
+                    {children.map(child => <option key={child.id} value={child.id}>{child.avatar} {child.name}</option>)}
+                  </select>
+                  <select
+                    value={awardTaskId}
+                    onChange={(event) => setAwardTaskId(event.target.value)}
+                    className="bg-white border border-emerald-200 rounded-xl p-3 font-bold text-slate-700 outline-none"
+                    required
+                  >
+                    <option value="">选择已完成的任务</option>
+                    {tasks.map(task => <option key={task.id} value={task.id}>{task.title}（+{task.coins}）</option>)}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={!awardTargetChildId || !awardTaskId}
+                    className="rounded-xl bg-emerald-600 px-5 py-3 font-extrabold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    立即奖励
+                  </button>
+                </form>
+              </div>
+            </div>
             {/* Left side list of Tasks */}
             <div className="lg:col-span-7 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
               <h3 className="font-extrabold text-slate-800 text-base border-b border-slate-100 pb-3">
